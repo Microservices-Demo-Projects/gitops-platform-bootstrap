@@ -10,14 +10,12 @@ have to restart apps by hand every time a password changed.
 ## What's here
 
 ```text
-values.yaml         2 replicas with leader election    (wave 30)
-../common/chart/    Helm chart for Reloader
-../manual/          Install by hand instead - see ../manual/README.md
+values.yaml          2 replicas with leader election         (wave 30)
+../common/chart/     Helm chart for Reloader
+../manual/           Install by hand instead
 ```
 
-There's no `config/` stage — Reloader is installed once and just runs. No
-operator exists for Reloader, so `chart/` is shared with the (future) OpenShift
-path — both platforms install it the same way.
+There's no `config/` stage — Reloader is installed once and just runs.
 
 ## Install
 

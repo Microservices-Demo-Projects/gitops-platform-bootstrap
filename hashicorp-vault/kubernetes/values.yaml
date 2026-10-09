@@ -1,7 +1,4 @@
-# Kubernetes-specific overrides for the hashicorp-vault-operator wrapper chart.
-# Runs the vault-operator Deployment with 2 replicas (leader-election protected)
-# for better availability on standard Kubernetes.
-
+# 2 replicas and a PDB, unlike the single-node OpenShift demo cluster.
 vault-operator:
   replicaCount: 2
   pdb:

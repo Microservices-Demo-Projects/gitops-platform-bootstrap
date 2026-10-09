@@ -1,6 +1,3 @@
-# The smoke test's own RBAC is scoped to PostSync too - it exists only to
-# run the Job below, so it shouldn't linger in the cluster once the test
-# passes.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -18,8 +15,6 @@ metadata:
     argocd.argoproj.io/hook: PostSync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 rules:
-  # `patch` matters on a retry: a re-run's `kubectl apply` finds the object
-  # already there and patches instead of creating it.
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "create", "patch", "delete"]
@@ -53,10 +48,6 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
   backoffLimit: 2
-  # Without a deadline a pod that can never start (unschedulable, or mounting a
-  # Secret that doesn't exist) leaves the hook Running forever, and ArgoCD's
-  # syncPolicy.retry only fires on a sync that terminates as Failed. Every hook
-  # Job in this repo sets one so a stall becomes a failure ArgoCD can retry.
   activeDeadlineSeconds: 900
   template:
     metadata:
@@ -73,9 +64,6 @@ spec:
             - |
               set -e
 
-              # Retry a command until it succeeds, bounded at ~5 min. Used by
-              # every smoke test in this repo so waiting behaves the same way
-              # everywhere.
               retry() {
                 n=0
                 until [ "$n" -ge 60 ]; do
@@ -88,9 +76,6 @@ spec:
                 return 1
               }
 
-              # No waiting for cert-manager itself here: this app's PreSync gate
-              # already proved the webhook admits and demo-ca can issue, which
-              # is why the test can get straight to the point.
               kubectl create namespace test-certs \
                 --dry-run=client -o yaml | kubectl apply -f -
 
@@ -130,15 +115,11 @@ spec:
                   group: cert-manager.io
               EOF
 
-              # Still retried: the gate's dry-run proves the webhook was serving
-              # a moment ago, not that it still is.
               retry kubectl apply -f /tmp/example-cert.yaml
 
               if kubectl wait --for=condition=Ready certificate/example-cert -n test-certs --timeout=300s; then
                 echo "example-cert is Ready, cleaning up test-certs namespace"
-                # --wait=false: the ServiceAccount only has get/create/delete on
-                # namespaces (not watch/list), so a waiting delete hangs forever
-                # trying to observe termination.
+                # --wait=false: this SA has no watch/list on namespaces.
                 kubectl delete namespace test-certs --wait=false
                 exit 0
               else

@@ -9,19 +9,15 @@ values file.
 ## What's here
 
 ```text
-../common/chart/    The vault-operator (installs the operator only)   (wave 30)
-../common/tests/    Prereq gate, then a smoke test that writes and reads a secret
+../common/chart/     The vault-operator (installs the operator only)   (wave 30)
+../common/tests/     Prereq gate, then a smoke test that writes and reads a secret
 values.yaml          OpenShift-specific chart values
 config/namespace/    The namespace, labelled for GitOps                (wave 30)
 config/scc/          A custom SCC + RoleBinding for the two capabilities
-                      the operator hardcodes onto the Vault container  (wave 30)
+                     the operator hardcodes onto the Vault container   (wave 30)
 config/base/         The Vault server itself, as a Vault resource      (wave 40)
-                      - wraps ../../common/config/base and adds
-                      platformManagedSecurityContext: true
+                     - wraps ../../common/config/base and patches it
 ```
-
-Two SCC accommodations are needed here, and they're independent of each other
-— see the two sections at the end.
 
 ## Install
 
@@ -37,15 +33,19 @@ oc get pods -n vault
 oc get vault vault -n vault -o jsonpath='{.status.leader}'
 ```
 
-## Everything else
-
 Getting the root token, what Vault is configured with, and why the operator
 instead of HashiCorp's own chart are all identical to the Kubernetes install
 — see [../kubernetes/README.md](../kubernetes/README.md).
 
-## SCC compatibility 1/2: the pod's UID and fsGroup
+## Notes
 
-Confirmed against a real CRC cluster: without it, the vault-operator sets an
+Three OpenShift-only accommodations, all rooted in the same thing: the Vault
+pod's UID is assigned dynamically by the `restricted-v2` SCC rather than baked
+into the image. They're otherwise independent of each other.
+
+### The pod's UID and fsGroup
+
+Confirmed against a real CRC cluster: by default the vault-operator sets an
 explicit `fsGroup` (and `runAsUser`) on both the Vault pod and the
 `vault-configurer` pod, which `restricted-v2` rejects outright —
 
@@ -55,14 +55,14 @@ security context constraint: [... restricted-v2: .spec.securityContext.fsGroup:
 Invalid value: []int64{1000}: 1000 is not an allowed group ...]
 ```
 
-`config/base/kustomization.yaml` here patches the Vault CR with
+`config/base/kustomization.yaml` patches the Vault CR with
 `spec.platformManagedSecurityContext: true`, which tells the operator to
 leave the security context unset on both pods so OpenShift's SCC assigns one
 dynamically instead — the same idea as stakater-reloader's `isOpenshift`
 flag, just exposed through this operator's own CRD rather than a Helm
 chart's values.
 
-## SCC compatibility 2/2: IPC_LOCK and SETFCAP
+### IPC_LOCK and SETFCAP
 
 `platformManagedSecurityContext` stops the operator pinning a UID and fsGroup.
 It does **not** stop it adding capabilities — every Vault container it renders
@@ -123,3 +123,29 @@ upgrading an existing cluster:
 ```bash
 oc apply -f argocd/openshift/bootstrap/appproject.yaml
 ```
+
+### The database connection needs an explicit username
+
+The shared `connection_url` carries a client cert and key but no username,
+which is fine on Kubernetes: the Vault image runs as uid 100, that uid has an
+`/etc/passwd` entry named `vault`, and libpq's fallback — the OS user of the
+connecting process — therefore happens to produce exactly the right name.
+
+On OpenShift there is no such entry. `restricted-v2` assigns an arbitrary UID
+from the namespace's range and nothing maps it to a name, so libpq falls back
+to the bare number and asks PostgreSQL to authenticate a role that doesn't
+exist. The client certificate is valid and its CN *is* `vault`, but the cert is
+checked against the *requested* username, so CNPG rejects it:
+
+```text
+FATAL: certificate authentication failed for user "1000790000" (SQLSTATE 28000)
+```
+
+That numeric username lands on `pg_hba`'s catch-all rule
+(`hostssl all all 0.0.0.0/0 cert clientcert=verify-full`, in
+[../../postgres/common/config/base/cluster.yaml](../../postgres/common/config/base/cluster.yaml)).
+`config/base/kustomization.yaml` patches `user=vault` into the URL, which
+removes the guess. It would be behaviour-identical on Kubernetes — it just
+spells out the name libpq was already deriving there — but it lives here
+because only OpenShift needs it and the Kubernetes manifests are a
+known-working copy.

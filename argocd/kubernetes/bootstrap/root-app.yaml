@@ -1,21 +1,8 @@
-# App-of-apps: the single Application a human/CI applies by hand. Syncing it
-# applies every Application manifest in argocd/kubernetes/apps/, which then
-# sync themselves in order via their own argocd.argoproj.io/sync-wave.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: platform-root
   namespace: argocd
-  # Makes `kubectl delete` of this Application cascade: without this finalizer
-  # ArgoCD only removes the Application CR and leaves everything it deployed
-  # running. Deleting platform-root therefore removes the child Applications
-  # in argocd/kubernetes/apps/, and because each of those carries the same
-  # finalizer, their own workloads come down too.
-  #
-  # It does not get you back to an empty cluster on its own: the cascade wedges
-  # on any child whose sync is still in flight, and it only deletes what ArgoCD
-  # tracks - not the namespaces, nor the PVCs and Secrets the operators made
-  # for themselves. Use argocd/kubernetes/teardown.sh for a full teardown.
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -36,8 +23,6 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-    # This sync now waits for the whole platform, wave by wave, so it can fail on
-    # a child that's still settling. Retry instead of needing a manual re-sync.
     retry:
       limit: 5
       backoff:

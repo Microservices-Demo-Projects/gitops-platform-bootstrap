@@ -1,20 +1,8 @@
-# Standard Kubernetes overrides for the stakater-reloader chart.
-# Applied on top of chart/values.yaml (which defaults to OpenShift) when
-# deploying to a non-OpenShift Kubernetes cluster via the GitOps path.
-#
-# Key paths verified against the actual upstream chart schema for
-# stakater/reloader 2.2.16 (helm show values stakater/reloader --version 2.2.16):
-# `deployment`, `enableHA` and `podDisruptionBudget` all live *under* the
-# top-level `reloader:` block, not as siblings of it.
-
+# 2 replicas and a PDB, unlike the single-node OpenShift demo cluster.
+# enableHA turns on leader election so only one replica is ever active.
 stakater-reloader:
   reloader:
-    # Standard Kubernetes assigns UIDs itself; no OpenShift SCC involved.
     isOpenshift: false
-
-    # Run 2 replicas for HA. enableHA must be set so Reloader turns on
-    # leader election between the replicas (only one replica is active
-    # at a time; the rest stand by).
     enableHA: true
 
     deployment:
@@ -22,8 +10,6 @@ stakater-reloader:
       securityContext:
         runAsUser: 65534 # nobody
 
-    # Keep at least 1 replica available during voluntary disruptions
-    # (node drains, upgrades) now that we run more than one replica.
     podDisruptionBudget:
       enabled: true
       minAvailable: 1

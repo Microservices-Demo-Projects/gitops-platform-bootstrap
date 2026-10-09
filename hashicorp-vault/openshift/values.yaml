@@ -1,8 +1,3 @@
-# OpenShift-specific overrides for the vault-operator wrapper chart.
-# No securityContext/runAsUser is set anywhere in this chart or in the Vault
-# CR it reconciles (../common/config/base/vault.yaml), which is the arbitrary-UID
-# shape restricted-v2 SCC expects - but this hasn't been verified against a real
-# OpenShift cluster. Single replica, no PDB: a demo CRC cluster is typically
-# single-node, unlike the multi-node Kubernetes setup this chart also serves.
+# Single replica, no PDB: the demo CRC cluster is single-node.
 vault-operator:
   replicaCount: 1

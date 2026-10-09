@@ -10,12 +10,11 @@ their certificates, which means they automatically trust each other.
 ## What's here
 
 ```text
-chart/          Helm chart for cert-manager itself           (wave 10)
-values.yaml     Kubernetes-specific chart values (HA tuning)
-manual/         Install by hand instead - see ../manual/README.md
-
-../common/config/   The demo-ca certificate authority        (wave 20)
-../common/tests/    Prereq gate, then a smoke test that issues a throwaway cert
+chart/               Helm chart for cert-manager itself      (wave 10)
+values.yaml          Kubernetes-specific chart values (HA tuning)
+../common/config/    The demo-ca certificate authority       (wave 20)
+../common/tests/     Prereq gate, then a smoke test that issues a throwaway cert
+../manual/           Install by hand instead
 ```
 
 ## Install
@@ -36,7 +35,9 @@ kubectl get clusterissuer
 Expect `self-signed` and `demo-ca`, both `READY=True`. If `demo-ca` isn't ready,
 nothing downstream will get a certificate.
 
-## How the CA works
+## Notes
+
+### How the CA works
 
 Three resources in a chain, all in `../common/config/base/root-ca.yaml`:
 

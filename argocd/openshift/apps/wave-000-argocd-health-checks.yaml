@@ -1,37 +1,7 @@
-# Health checks ArgoCD doesn't have out of the box. Both are needed for the sync
-# waves below to actually gate on anything.
-#
-# These MUST go on the ArgoCD CR, not on a ConfigMap. Two ConfigMaps look like
-# plausible homes and neither works:
-#
-#   - openshift-gitops-cm - nothing reads it. It carries the
-#     app.kubernetes.io/part-of: argocd label, which makes it look like ArgoCD
-#     config, but the application-controller runs without --configmap-name, so
-#     it only ever reads argocd-cm. Health checks written here are silently
-#     ignored: platform-root then treats every child as instantly Healthy and
-#     creates all 10 at once, blowing through every wave in ~20 seconds.
-#   - argocd-cm - the real one, but operator-owned (ownerReferences ->
-#     ArgoCD/openshift-gitops, operator.argoproj.io/tracked-by: argocd). The
-#     operator reconciles it, so hand-written keys get reverted.
-#
-# spec.resourceHealthChecks is the operator's supported input for exactly this:
-# it renders each entry into argocd-cm as
-# resource.customizations.health.<group>_<kind>, which the controller picks up
-# live - no restart.
-#
-# Two sync options are load-bearing here:
-#
-#   - ServerSideApply=true. This is a PARTIAL ArgoCD CR - it declares only
-#     spec.resourceHealthChecks. A client-side apply would send it as the whole
-#     object and wipe every other field on the instance, including the
-#     spec.namespaceManagement grants from the prerequisite setup. Server-side
-#     apply makes ArgoCD own only the fields it actually declares and leaves the
-#     rest to their own field managers.
-#   - Delete=false,Prune=false. Without these, pruning this Application (or
-#     platform-root cascading) would delete the ArgoCD CR itself - i.e. destroy
-#     the ArgoCD instance doing the syncing, taking the whole platform with it.
-#
-# Wave 0, so the checks are registered before the resources they assess exist.
+# Health checks ArgoCD lacks by default: a child Application is only Healthy when
+# Synced+Healthy, and a Vault CR only once its raft cluster has elected a leader.
+# Patched into the ArgoCD CR (the operator-supported route to argocd-cm) with
+# ServerSideApply so this owns only resourceHealthChecks. See ../../README.md#the-two-health-checks-in-wave-0
 apiVersion: argoproj.io/v1beta1
 kind: ArgoCD
 metadata:
@@ -42,8 +12,6 @@ metadata:
     argocd.argoproj.io/sync-options: ServerSideApply=true,Delete=false,Prune=false
 spec:
   resourceHealthChecks:
-    # ArgoCD dropped this check in 1.8, so by default platform-root thinks every
-    # child is instantly healthy and ignores the waves entirely.
     - group: argoproj.io
       kind: Application
       check: |
@@ -73,10 +41,6 @@ spec:
         end
 
         return hs
-    # ArgoCD has no check for a Vault resource, so without this the vault app
-    # reports Healthy the moment the CR is created - before Vault is unsealed -
-    # and wave 50/60 would sync against a Vault that isn't usable yet.
-    # status.leader/conditions confirmed against vault-operator:1.24.0's CRD.
     - group: vault.banzaicloud.com
       kind: Vault
       check: |

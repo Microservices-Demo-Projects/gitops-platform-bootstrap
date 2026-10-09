@@ -1,19 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# The PreSync gate is shared with Kubernetes (../../common/tests/gate) and only
-# needs two env values patched. The PostSync smoke test is NOT shared: it needs
-# a genuinely different pod shape under the restricted-v2 SCC, so it lives here
-# as its own file - see smoke-test-job.yaml for the full reasoning. The
-# Kubernetes copy in ../../common/tests/base is deliberately left untouched.
 resources:
   - ../../common/tests/gate
   - smoke-test-job.yaml
 
-# Where the CNPG operator itself lands differs by how it got installed at wave
-# 30: the OLM-installed operand runs as cnpg-controller-manager in the shared
-# openshift-operators namespace, not cloudnative-pg-operator in cnpg-system
-# like the Kubernetes Helm chart.
 patches:
   - target:
       kind: Job

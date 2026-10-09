@@ -1,7 +1,3 @@
-# The operator hardcodes its own namespace (cert-manager-operator) and the
-# operand's namespace (cert-manager) - not configurable via the Subscription.
-# It also auto-creates a default CertManager CR named "cluster" if none exists,
-# so no CertManager CR needs to be authored here.
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
 metadata:

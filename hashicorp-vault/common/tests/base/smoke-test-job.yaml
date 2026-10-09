@@ -1,8 +1,3 @@
-# RBAC for the smoke-test Job below, scoped to `get` on exactly the
-# `vault-unseal-keys` Secret in case the container image is ever swapped for
-# one that reads it via the Kubernetes API instead of a native secretKeyRef
-# mount. Hook-annotated the same as the Job - it exists only for that one
-# test and shouldn't linger once it passes.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -43,10 +38,6 @@ roleRef:
   name: vault-smoke-test
   apiGroup: rbac.authorization.k8s.io
 ---
-# PostSync hook: writes, reads, and deletes a throwaway KV secret to verify
-# the bank-vaults-managed Vault is up, unsealed, and reachable over TLS using
-# the operator-generated root token - proving the fully-automated init/unseal
-# path actually worked, with no human running `vault operator init/unseal`.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -57,11 +48,6 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
   backoffLimit: 2
-  # This one matters most: the pod mounts vault-tls and reads vault-unseal-keys,
-  # both created during Vault's own first boot. Until they exist the kubelet
-  # retries the mount forever and no container ever runs, so without a deadline
-  # the hook would sit Running and syncPolicy.retry - which only fires on a sync
-  # that terminates as Failed - would never get a chance.
   activeDeadlineSeconds: 900
   template:
     metadata:
@@ -78,22 +64,12 @@ spec:
                 path: ca.crt
       containers:
         - name: smoke-test
-          # Fully-qualified, not the bare "hashicorp/vault" short name: RHEL
-          # nodes (and CRC) ship a short-name alias
-          # (/etc/containers/registries.conf.d/001-rhel-shortnames.conf)
-          # redirecting it to registry.connect.redhat.com/hashicorp/vault,
-          # whose catalog doesn't carry the 2.0.4 tag - ImagePullBackOff:
-          # "name unknown: Image not found".
           image: docker.io/hashicorp/vault:2.0.4
           env:
             - name: VAULT_ADDR
               value: "https://vault.vault.svc.cluster.local:8200"
             - name: VAULT_CACERT
               value: /vault/tls/ca.crt
-            # The operator stores the root token it generated during
-            # first-boot init under the "vault-root" key of the
-            # vault-unseal-keys Secret (same Secret referenced by
-            # spec.unsealConfig.kubernetes in config/base/vault.yaml).
             - name: VAULT_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -109,9 +85,6 @@ spec:
             - |
               set -e
 
-              # Retry a command until it succeeds, bounded at ~5 min. Used by
-              # every smoke test in this repo so waiting behaves the same way
-              # everywhere.
               retry() {
                 n=0
                 until [ "$n" -ge 60 ]; do
@@ -127,10 +100,6 @@ spec:
               KV_PATH="kv/smoke-test"
               EXPECTED="ok"
 
-              # The operator needs time to init, unseal, and elect a raft
-              # leader before Vault answers writes - retried rather than
-              # assumed. Once this succeeds Vault is up, so the reads and
-              # deletes below need no waiting of their own.
               echo "Writing $KV_PATH..."
               retry vault kv put "$KV_PATH" value="$EXPECTED"
 

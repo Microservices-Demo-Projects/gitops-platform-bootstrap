@@ -1,13 +1,3 @@
-# PreSync gate: nothing in this app is applied until CloudNativePG can accept a
-# Cluster and cert-manager can issue the certificates that Cluster mounts.
-#
-# The Cluster resource references postgres-server-tls and postgres-replication-tls
-# directly. Applied before those Certificates can be issued, the pods never start
-# and the app sits Progressing until it times out.
-#
-# Deliberately not gated on Vault or the ClusterSecretStore: no manifest in this
-# app references either. The smoke test needs Vault's database engine, and waits
-# for it itself.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -28,15 +18,12 @@ rules:
   - apiGroups: ["apiextensions.k8s.io"]
     resources: ["customresourcedefinitions"]
     verbs: ["get", "list", "watch"]
-  # list/watch as well as get, so `kubectl wait` can observe the change.
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["cert-manager.io"]
     resources: ["clusterissuers"]
     verbs: ["get", "list", "watch"]
-  # `create` is what a server-side dry-run authorises against - it runs the
-  # admission chain and then discards the object, so nothing is created.
   - apiGroups: ["cert-manager.io"]
     resources: ["certificates"]
     verbs: ["create"]
@@ -67,10 +54,6 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
   backoffLimit: 2
-  # Without a deadline a pod that can never start (unschedulable, or mounting a
-  # Secret that doesn't exist) leaves the hook Running forever, and ArgoCD's
-  # syncPolicy.retry only fires on a sync that terminates as Failed. Every hook
-  # Job in this repo sets one so a stall becomes a failure ArgoCD can retry.
   activeDeadlineSeconds: 600
   template:
     metadata:
@@ -82,10 +65,6 @@ spec:
         - name: presync-gate
           image: docker.io/alpine/k8s:1.34.9
           env:
-            # Where the CNPG operator itself lands differs by how it got
-            # installed (wave 30) - the Kubernetes Helm chart's own namespace
-            # and Deployment name, overridden by postgres/openshift/tests for
-            # the OLM-installed operand (openshift-operators/cnpg-controller-manager).
             - name: CNPG_OPERATOR_NAMESPACE
               value: cnpg-system
             - name: CNPG_OPERATOR_DEPLOYMENT
@@ -96,9 +75,6 @@ spec:
             - |
               set -e
 
-              # Retry a command until it succeeds, bounded at ~5 min. Used by
-              # every hook in this repo so waiting behaves the same way
-              # everywhere.
               retry() {
                 n=0
                 until [ "$n" -ge 60 ]; do
@@ -111,9 +87,6 @@ spec:
                 return 1
               }
 
-              # `kubectl wait` errors out immediately rather than waiting when
-              # the object doesn't exist yet, so confirm existence first and
-              # only then wait on the condition.
               wait_for() {
                 cond=$1
                 shift
@@ -121,17 +94,11 @@ spec:
                 kubectl wait --for=condition="$cond" "$@" --timeout=300s
               }
 
-              # The CRD the Cluster is an instance of, and the operator that
-              # reconciles it - which also serves the Cluster admission webhook.
               wait_for Established crd/clusters.postgresql.cnpg.io
               wait_for Available "deployment/$CNPG_OPERATOR_DEPLOYMENT" -n "$CNPG_OPERATOR_NAMESPACE"
 
-              # The CA that issues both Postgres certificates.
               wait_for Ready clusterissuer/demo-ca
 
-              # Same shape as postgres-server-tls, as a server-side dry-run: it
-              # goes through cert-manager's real webhook but creates nothing, so
-              # it proves the admission path is up before the Cluster is applied.
               cat <<'EOF' > /tmp/probe.yaml
               apiVersion: cert-manager.io/v1
               kind: Certificate

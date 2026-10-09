@@ -1,7 +1,4 @@
-# Kubernetes-specific overrides for the external-secrets wrapper chart.
-# Runs the ESO controller with 2 replicas and enables a PodDisruptionBudget
-# for better availability on standard Kubernetes.
-
+# 2 replicas and a PDB, unlike the single-node OpenShift demo cluster.
 external-secrets:
   replicaCount: 2
   podDisruptionBudget:

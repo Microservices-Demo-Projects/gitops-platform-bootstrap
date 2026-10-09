@@ -1,52 +1,5 @@
-# A copy of OpenShift's restricted-v2 SCC that additionally permits the two
-# Linux capabilities the vault-operator hardcodes onto the Vault container.
-#
-# Why this is needed at all
-# -------------------------
-# platformManagedSecurityContext: true (see ../base/kustomization.yaml) stops
-# the operator from pinning fsGroup/runAsUser, but it does NOT stop it from
-# adding capabilities. Every Vault container it renders gets:
-#
-#   securityContext: {capabilities: {add: [IPC_LOCK, SETFCAP]}}
-#
-# and no shipped SCC allows either one (restricted-v2 allows only
-# NET_BIND_SERVICE; anyuid and the rest allow none; only privileged allows
-# everything, which is far too broad for this). So the StatefulSet can't create
-# its pod at all:
-#
-#   pods "vault-0" is forbidden: unable to validate against any security context
-#   constraint: [... restricted-v2: .containers[0].capabilities.add: Invalid
-#   value: "IPC_LOCK": capability may not be added, restricted-v2:
-#   .containers[0].capabilities.add: Invalid value: "SETFCAP": capability may
-#   not be added ...]
-#
-# Why not just remove the capabilities instead
-# --------------------------------------------
-# Two routes were tried against the installed operator (vault-operator v1.24.0)
-# and neither works:
-#
-#   - spec.skipVaultContainerCapabilities. Exists in newer bank-vaults source
-#     ("stops the operator from adding the IPC_LOCK and SETFCAP capabilities"),
-#     but not in this version's CRD - `oc explain
-#     vault.spec.skipVaultContainerCapabilities` returns "field does not exist".
-#   - spec.vaultContainerSpec.securityContext.capabilities.add. The operator
-#     UNIONS this with its own list rather than replacing it, confirmed
-#     empirically: an empty list was ignored, and adding NET_BIND_SERVICE
-#     produced [IPC_LOCK, SETFCAP, NET_BIND_SERVICE]. So there is no way to
-#     subtract from it.
-#
-# Granting the two capabilities is therefore the only route, and it is a narrow
-# one: this SCC is identical to restricted-v2 in every other respect (no host
-# access, no privilege escalation, dynamically allocated UID and fsGroup,
-# requiredDropCapabilities ALL, runtime/default seccomp) and it is usable only
-# by the single `vault` ServiceAccount, via the RoleBinding in rbac.yaml.
-#
-# Both capabilities are, in fairness, ones Vault genuinely asks for: IPC_LOCK
-# for mlock() so key material is never swapped to disk, SETFCAP so the
-# entrypoint can set that capability on the binary. (Our config sets
-# disable_mlock: true, since raft storage on a container filesystem doesn't
-# support it, so IPC_LOCK goes unused in practice - but the operator adds it
-# regardless.)
+# restricted-v2 verbatim, plus the two capabilities the vault-operator hardcodes
+# onto the Vault container. Why it can't be avoided: ../../README.md#ipc_lock-and-setfcap
 apiVersion: security.openshift.io/v1
 kind: SecurityContextConstraints
 metadata:
@@ -56,19 +9,15 @@ metadata:
       restricted-v2 plus the IPC_LOCK and SETFCAP capabilities the
       bank-vaults vault-operator hardcodes onto the Vault container. Bound
       only to the `vault` ServiceAccount in the `vault` namespace.
-# The whole point of this SCC. requiredDropCapabilities below still drops
-# everything else, exactly as restricted-v2 does - listing a capability here
-# only means a container is *allowed* to ask for it.
+# Listing a capability here only allows a container to request it; ALL is still dropped.
 allowedCapabilities:
   - IPC_LOCK
   - SETFCAP
-  # Kept from restricted-v2 so this stays a strict superset of it.
   - NET_BIND_SERVICE
 requiredDropCapabilities:
   - ALL
 defaultAddCapabilities: null
 
-# Everything from here down is restricted-v2 verbatim.
 allowHostDirVolumePlugin: false
 allowHostIPC: false
 allowHostNetwork: false
@@ -97,8 +46,6 @@ volumes:
   - projected
   - secret
 
-# Deliberately empty: access is granted through the RoleBinding in rbac.yaml,
-# not by listing users/groups here, so the grant is visible in RBAC and scoped
-# to one namespace.
+# Empty on purpose - access comes from the RoleBinding in rbac.yaml.
 users: []
 groups: []

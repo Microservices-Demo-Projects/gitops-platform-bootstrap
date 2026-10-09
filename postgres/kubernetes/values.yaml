@@ -1,6 +1,2 @@
-# Kubernetes-specific overrides for the postgres wrapper chart (CNPG operator).
-# Runs the operator controller with 2 replicas for HA. CNPG's controller-runtime
-# manager uses leader election (its own Lease) natively, so only one replica is
-# ever active at a time; the second is a hot standby that takes over on failure.
 cloudnative-pg:
   replicaCount: 2

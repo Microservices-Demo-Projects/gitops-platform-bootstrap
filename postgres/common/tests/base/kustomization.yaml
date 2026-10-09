@@ -2,10 +2,5 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  # PreSync: waits for this app's prerequisites. Shared with the OpenShift
-  # overlay, hence its own directory - see ../gate/kustomization.yaml.
   - ../gate
-  # PostSync: proves the component actually works. NOT shared - OpenShift needs
-  # a different pod shape and keeps its own copy in
-  # ../../../openshift/tests/smoke-test-job.yaml.
   - smoke-test-job.yaml

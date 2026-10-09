@@ -1,17 +1,8 @@
-# The shared demo-ca root CA (ClusterIssuer + Certificate + intermediate
-# ClusterIssuer) every other component's Certificate depends on, plus a
-# PostSync smoke test proving cert-manager can actually issue against it.
-# Identical to the Kubernetes wave-020 app - the CA chain and test Jobs have no
-# OpenShift-specific requirements, only how cert-manager itself gets installed
-# differs (Operator here vs Helm chart on Kubernetes).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: cert-manager-config
   namespace: openshift-gitops
-  # Cascades deletion to this Application's own resources, so removing the
-  # parent platform-root (which deletes this Application) also tears down what
-  # it deployed instead of orphaning it.
   finalizers:
     - resources-finalizer.argocd.argoproj.io
   annotations:
@@ -38,9 +29,6 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-    # Transient bootstrap failures (a dependency's webhook or API not
-    # answering yet) are retried automatically instead of needing a manual
-    # re-sync: ~10s/20s/40s/80s/160s.
     retry:
       limit: 5
       backoff:

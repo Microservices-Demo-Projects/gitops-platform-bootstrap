@@ -1,9 +1,3 @@
-# Server TLS certificate for the CNPG "postgres" Cluster, issued off the
-# shared `demo-ca` ClusterIssuer. The resulting secret's ca.crt (plus
-# tls.crt/tls.key) lets it double as both serverTLSSecret and serverCASecret
-# on the Cluster CR (cluster.yaml) - CNPG supports this when serverCASecret's
-# ca.key is omitted. DNS names cover all three CNPG-created Services:
-# postgres-rw (primary, rw), postgres-ro (replicas, ro), postgres-r (any, r).
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:

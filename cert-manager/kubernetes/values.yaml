@@ -1,16 +1,8 @@
-# Kubernetes-specific overrides for the cert-manager wrapper chart.
-# Runs the controller, webhook, and cainjector with 2 replicas and enables a
-# PodDisruptionBudget for each, for better availability on standard Kubernetes.
-
 cert-manager:
   replicaCount: 2
   podDisruptionBudget:
     enabled: true
 
-  # The chart defaults the leader-election Lease to kube-system, which the
-  # ArgoCD AppProject doesn't (and shouldn't) permit writing to. Keep it
-  # inside this component's own namespace instead. This lives under `global`,
-  # not top-level - the schema only accepts it there.
   global:
     leaderElection:
       namespace: cert-manager

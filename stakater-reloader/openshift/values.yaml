@@ -1,20 +1,8 @@
-# Unsets the reloader subchart's own default
-# (reloader.deployment.securityContext.runAsUser: 65534), which OpenShift's
-# restricted-v2 SCC rejects (65534 isn't in the namespace's allocated UID
-# range) - so its admission webhook can assign a UID dynamically instead.
-#
-# This has to be a genuine ArgoCD `helm.valueFiles` overlay, not baked into
-# ../common/chart/values.yaml (the wrapper chart's own default values file):
-# Helm's dependency-value coalescing does not treat a null set in a chart's
-# *own* default values as "unset the subchart's default" - only a
-# user-supplied values file (or --set) layered on top of the chart does.
-# Verified locally with `helm template`: the same null baked into
-# common/chart/values.yaml renders as the subchart's unchanged 65534; passed
-# here via `-f`/`helm.valueFiles`, it actually removes the key.
+# The subchart pins runAsUser: 65534, which restricted-v2 rejects; null deletes
+# the key so the platform assigns a UID. Has to be an ArgoCD valueFiles overlay
+# rather than a chart default. See ./README.md#notes
 stakater-reloader:
   reloader:
-    # Enable OpenShift-specific features. kubernetes/values.yaml sets this
-    # false - standard Kubernetes assigns UIDs itself, no SCC involved.
     isOpenshift: true
 
     deployment:

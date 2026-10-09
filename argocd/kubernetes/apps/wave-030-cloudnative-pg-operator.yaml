@@ -1,14 +1,8 @@
-# The CloudNativePG controller only. The actual PostgreSQL Cluster CR is
-# deployed separately by wave-060-postgres.yaml, after Vault's
-# database secrets engine and role exist to consume it.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: cloudnative-pg-operator
   namespace: argocd
-  # Cascades deletion to this Application's own resources, so removing the
-  # parent platform-root (which deletes this Application) also tears down what
-  # it deployed instead of orphaning it.
   finalizers:
     - resources-finalizer.argocd.argoproj.io
   annotations:
@@ -36,9 +30,6 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-    # Transient bootstrap failures (a dependency's webhook or API not
-    # answering yet) are retried automatically instead of needing a manual
-    # re-sync: ~10s/20s/40s/80s/160s.
     retry:
       limit: 5
       backoff:

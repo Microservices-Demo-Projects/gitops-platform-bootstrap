@@ -1,11 +1,3 @@
-# TLS certificate for the Vault server itself, issued by the platform's
-# demo-ca ClusterIssuer. Referenced by config/base/vault.yaml via
-# spec.existingTlsSecretName so the bank-vaults operator uses this
-# cert-manager-managed cert instead of generating its own self-signed one.
-#
-# The operator remaps this secret's standard cert-manager keys
-# (tls.crt / tls.key / ca.crt) onto /vault/tls/server.crt, /vault/tls/server.key
-# and /vault/tls/ca.crt inside the Vault pod.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -19,9 +11,6 @@ spec:
   commonName: vault
   dnsNames:
     - vault
-    # The operator's vault-configurer Deployment hardcodes VAULT_ADDR to this
-    # short <service>.<namespace> form regardless of spec.config.api_addr, so
-    # it needs its own SAN entry alongside the full-form names below.
     - vault.vault
     - vault.vault.svc
     - vault.vault.svc.cluster.local

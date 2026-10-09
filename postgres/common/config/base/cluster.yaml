@@ -1,12 +1,5 @@
-# CNPG Cluster CR: a 3-instance (1 primary + 2 replica) HA PostgreSQL cluster.
-#
-# Resulting Services (CNPG convention: `<name>-rw|-ro|-r`):
-#   postgres-rw.postgres.svc.cluster.local:5432  (primary, read/write)
-#   postgres-ro.postgres.svc.cluster.local:5432  (replicas, read-only)
-#   postgres-r.postgres.svc.cluster.local:5432   (any instance, read)
-#
-# The hashicorp-vault component's Vault CR (externalConfig database/config/pocdb)
-# must point its connection_url at postgres-rw.postgres.svc.cluster.local:5432/pocdb.
+# 3-instance HA cluster. CNPG creates postgres-rw / -ro / -r Services in the
+# postgres namespace; Vault's connection_url points at -rw.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -20,14 +13,7 @@ spec:
   storage:
     size: 5Gi
 
-  # Off by default (CNPG's own recommendation - the operator manages the
-  # cluster through its own internal mechanism and doesn't need this).
-  # Superuser login is break-glass only: flip to true, commit, push, let
-  # ArgoCD sync - CNPG generates a fresh password into the auto-created
-  # `postgres-superuser` Secret and enables login with it. Flip back to
-  # false and sync again to disable login once done. Each toggle is a git
-  # commit, so there's an audit trail of every time superuser access was
-  # opened.
+  # Break-glass only, one git commit per toggle. See ../../../README.md#notes
   enableSuperuserAccess: false
 
   certificates:
@@ -38,7 +24,6 @@ spec:
 
   managed:
     roles:
-      # Pure permission/group roles (NOLOGIN) applications are granted into.
       - name: app_ro
         login: false
         connectionLimit: -1
@@ -51,27 +36,13 @@ spec:
         ensure: present
         inherit: true
         comment: Read-write application role for the app schema in pocdb.
-      # Deliberately NOT managed here: CNPG's managed-role reconciler treats
-      # a role's `inRoles` list (default empty) as the sole source of truth
-      # for its memberships and continuously REVOKEs anything outside it -
-      # including the WITH ADMIN OPTION grant below, and `inRoles` itself has
-      # no way to request ADMIN OPTION (a plain GRANT, re-applied every
-      # reconcile, silently strips whatever option was there before). Since
-      # PG16+ requires ADMIN OPTION to grant a role you didn't create
-      # (CREATEROLE alone no longer suffices), letting CNPG manage "vault"
-      # here breaks dynamic credential creation within minutes of every
-      # start. Left entirely to postInitApplicationSQL below instead, which
-      # runs once at bootstrap and is never touched again.
+      # `vault` is deliberately absent here. See ../../../README.md#notes
 
   bootstrap:
     initdb:
       database: pocdb
       owner: postgres
       postInitApplicationSQL:
-        # -- Vault service role. This is its only definition (see the comment
-        # -- above managed.roles for why it's deliberately not a managed
-        # -- role) - CREATE USER defaults to LOGIN, no password set means
-        # -- cert/mTLS-only auth.
         - |
           -- Creating vault user without password i.e., it will login with cert / mTLS only
           -- Vault user is purely for role management i.e., create new users and rotating credentials.
@@ -88,45 +59,27 @@ spec:
         - |
           ALTER DEFAULT PRIVILEGES IN SCHEMA app
           GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_rw;
-        # -- Allows vault to grant these roles to the dynamic users it creates.
+        # ADMIN OPTION lets vault grant these to the users it creates.
         - GRANT app_ro TO vault WITH ADMIN OPTION;
         - GRANT app_rw TO vault WITH ADMIN OPTION;
 
   postgresql:
+    # First-match-wins, so the specific rules come first.
     pg_hba:
-      # ----------------------------------------------------------------------
-      # 1. mTLS ONLY for the vault service role, no password fallback.
-      # ----------------------------------------------------------------------
+      # vault: mTLS only, no password fallback.
       - hostssl all vault 0.0.0.0/0 cert clientcert=verify-full
       - hostssl all vault ::/0       cert clientcert=verify-full
 
-      # ----------------------------------------------------------------------
-      # 2. Vault-issued dynamic users: TLS + password (scram-sha-256).
-      # These are matched by ROLE MEMBERSHIP (the "+role" syntax matches any
-      # role that is a MEMBER of app_ro/app_rw), not by username glob -- fixing
-      # the old Bitnami config's `vlt_+` rule, which was invalid glob syntax
-      # and never matched anything (pg_hba is first-match-wins with no
-      # fallthrough on a non-match, so those two lines were silently dead).
-      # Vault's creation_statements GRANT the dynamic vlt_app_ro_*/vlt_app_rw_*
-      # user into app_ro/app_rw at creation time, so membership matching works.
-      # ----------------------------------------------------------------------
+      # Vault-issued dynamic users, matched by role membership not by name.
       - hostssl all +app_ro 0.0.0.0/0 scram-sha-256
       - hostssl all +app_ro ::/0       scram-sha-256
       - hostssl all +app_rw 0.0.0.0/0 scram-sha-256
       - hostssl all +app_rw ::/0       scram-sha-256
 
-      # ----------------------------------------------------------------------
-      # 3. Everyone else (the postgres superuser, break-glass, etc.): allow
-      # mTLS if a client cert is presented, otherwise fall back to
-      # TLS + password. Placed AFTER the specific rules above so it never
-      # shadows them.
-      # ----------------------------------------------------------------------
+      # Everyone else: client cert if offered, otherwise TLS + password.
       - hostssl all all 0.0.0.0/0 cert clientcert=verify-full
       - hostssl all all ::/0       cert clientcert=verify-full
       - hostssl all all 0.0.0.0/0 scram-sha-256
       - hostssl all all ::/0       scram-sha-256
 
-      # ----------------------------------------------------------------------
-      # 4. Local (in-pod) connections: password only, for break-glass access.
-      # ----------------------------------------------------------------------
       - local all all scram-sha-256

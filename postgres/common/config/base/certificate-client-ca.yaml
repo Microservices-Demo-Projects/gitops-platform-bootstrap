@@ -1,10 +1,3 @@
-# clientCASecret (cluster.yaml) just reuses postgres-server-tls's ca.crt -
-# no separate resource needed, since demo-ca is the one shared CA platform-
-# wide. What IS needed here: clientCASecret's ca.key is never provided by
-# cert-manager, so CNPG can't mint the internal streaming_replica client
-# cert itself and needs this explicit replicationTLSSecret instead -
-# required for the 3-instance (1 primary + 2 replica) streaming replication
-# to establish.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:

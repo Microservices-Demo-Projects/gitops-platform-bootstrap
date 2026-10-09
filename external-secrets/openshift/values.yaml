@@ -1,42 +1,17 @@
-# OpenShift-specific overrides for the external-secrets wrapper chart.
-#
-# Single replica and no PodDisruptionBudget, since the CRC/demo cluster is
-# typically single-node (the upstream chart already defaults to 1 replica; the
-# Kubernetes values file is the one that opts into 2 + a PDB).
-#
-# The rest of this file exists for one reason: the upstream chart hardcodes
-# `runAsUser: 1000` on all three of its workloads. OpenShift's restricted-v2
-# SCC rejects a fixed UID outright unless it happens to fall inside the
-# namespace's dynamically allocated range, which 1000 does not -
-#
-#   pods "external-secrets-..." is forbidden: unable to validate against any
-#   security context constraint: ... .spec.securityContext.runAsUser: Invalid
-#   value: 1000: must be in the ranges: [1000xxxxxx, 1000xxxxxx]
-#
-# Setting the key to null makes Helm drop it from the rendered securityContext
-# (an explicit null in user values deletes the key during merge) so OpenShift
-# assigns a UID from the namespace's own range instead. `runAsNonRoot: true`,
-# `readOnlyRootFilesystem: true`, dropped capabilities and the seccomp profile
-# all stay exactly as upstream ships them - restricted-v2 is happy with those,
-# it's only the pinned UID it objects to.
-#
-# Same idea as stakater-reloader's `isOpenshift` flag and the Vault CR's
-# `platformManagedSecurityContext: true`: let the platform pick the UID.
+# The upstream chart pins runAsUser: 1000, which restricted-v2 rejects; null
+# deletes the key so the platform assigns a UID. See ./README.md#notes
 external-secrets:
   replicaCount: 1
   podDisruptionBudget:
     enabled: false
 
-  # The ESO controller itself.
   securityContext:
     runAsUser: null
 
-  # The admission webhook.
   webhook:
     securityContext:
       runAsUser: null
 
-  # The controller that issues the webhook's serving certificate.
   certController:
     securityContext:
       runAsUser: null

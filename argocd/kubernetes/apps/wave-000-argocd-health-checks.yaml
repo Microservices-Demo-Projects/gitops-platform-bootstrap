@@ -1,12 +1,5 @@
-# Health checks ArgoCD doesn't have out of the box. Both are needed for the sync
-# waves below to actually gate on anything.
-#
-# Wave 0, so they're registered before the resources they assess exist. ArgoCD
-# picks up argocd-cm changes live, no restart needed.
-#
-# Keep every health check in THIS ONE FILE. ArgoCD applies with a single shared
-# field manager, so a second Application declaring a partial argocd-cm would
-# delete the keys this one owns.
+# Health checks ArgoCD lacks by default: a child Application is only Healthy when
+# Synced+Healthy, and a Vault CR only once its raft cluster has elected a leader.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -16,16 +9,8 @@ metadata:
     app.kubernetes.io/part-of: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "0"
-    # argocd-cm is ArgoCD's own config, not ours - we only add keys to it. Never
-    # let ArgoCD delete it: the controller reads this ConfigMap on every delete,
-    # so once it's gone `finalizeApplicationDeletion` fails for every app and
-    # nothing can ever be torn down again, including the app that removed it.
-    #   Unable to delete application resources: cannot apply impersonation:
-    #   ... application.sync.impersonation.enabled ... configmap not found
     argocd.argoproj.io/sync-options: Delete=false,Prune=false
 data:
-  # ArgoCD dropped this check in 1.8, so by default platform-root thinks every
-  # child is instantly healthy and creates all 10 at once, ignoring the waves.
   resource.customizations.health.argoproj.io_Application: |
     hs = {}
     hs.status = "Progressing"
@@ -54,10 +39,6 @@ data:
 
     return hs
 
-  # ArgoCD has no check for a Vault resource, so without this the vault app
-  # reports Healthy the moment the CR is created - before Vault is unsealed - and
-  # wave 50/60 would sync against a Vault that isn't usable yet.
-  # status.leader/conditions confirmed against vault-operator:1.24.0's CRD.
   resource.customizations.health.vault.banzaicloud.com_Vault: |
     hs = {}
     hs.status = "Progressing"

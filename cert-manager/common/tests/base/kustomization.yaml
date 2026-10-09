@@ -2,7 +2,5 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  # PreSync: waits for this app's prerequisites
   - presync-gate-job.yaml
-  # PostSync: proves the component actually works
   - smoke-test-job.yaml

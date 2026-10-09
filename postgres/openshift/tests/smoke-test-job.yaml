@@ -1,36 +1,5 @@
-# PostSync smoke test: proves Vault's `database/config/pocdb` connection (set
-# up with verify_connection: false in the hashicorp-vault component, since
-# Postgres didn't exist yet at that point) actually works now that the real
-# Cluster is up, by requesting and using a live dynamic `app-ro` lease.
-#
-# On failure the job (and any lease it created) is left in place for
-# debugging rather than being cleaned up.
-#
-# ---------------------------------------------------------------------------
-# This is an OpenShift-specific copy of ../../common/tests/base/smoke-test-job.yaml.
-# It asserts exactly the same thing; only *how* it gets its two tools differs.
-#
-# The Kubernetes version runs one container off the hashicorp/vault image and
-# `apk add`s the postgres client into it. That cannot work here. Under the
-# restricted-v2 SCC the container runs as an arbitrary non-root UID from the
-# namespace's range, and apk needs to write /lib/apk and /var/log, so it exits
-# before the test starts:
-#
-#   ERROR: Unable to open log: Permission denied
-#
-# Granting a package manager write access, or an SCC that allows root, would be
-# a much worse trade than splitting the work across images that already carry
-# the tool each step needs - which is what this does:
-#
-#   fetch-vault-token (alpine/k8s)  -> waits for the primary, reads the root token
-#   fetch-db-creds    (vault)       -> requests the dynamic lease
-#   psql-check        (postgresql)  -> the actual SELECT 1 over verify-full TLS
-#   revoke-lease      (vault)       -> cleanup, main container so it runs last
-#
-# The Kubernetes copy is deliberately left alone. If it ever needs the same
-# treatment, note that `hashicorp/vault:1.21` is no longer Alpine either - the
-# tag now resolves to a UBI/RHEL base with microdnf and no apk at all.
-# ---------------------------------------------------------------------------
+# Same assertions as ../../common/tests/base/smoke-test-job.yaml, but split across
+# four images instead of apk-installing psql. See ../README.md#notes
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -40,8 +9,6 @@ metadata:
     argocd.argoproj.io/hook: PostSync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 ---
-# Lets the init container `kubectl wait` for the CNPG primary pod to be Ready
-# before the test tries to connect to it.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -72,11 +39,6 @@ roleRef:
   name: postgres-smoke-test-pods
   apiGroup: rbac.authorization.k8s.io
 ---
-# The job needs the operator-generated Vault root token to call `vault read
-# database/creds/app-ro` (same problem/fix as external-secrets' smoke test:
-# there's no VAULT_TOKEN env var or service-account auth wired up for this
-# ad-hoc CLI use, so it's fetched from the vault-unseal-keys Secret instead).
-# Hook-annotated the same as the Job - it exists only for that one test.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -115,19 +77,9 @@ metadata:
   namespace: postgres
   annotations:
     argocd.argoproj.io/hook: PostSync
-    # BeforeHookCreation (not just HookSucceeded): Job.spec.template is
-    # immutable, so if a Job with this name already exists from a prior
-    # sync attempt (e.g. one that failed, or is being retried), ArgoCD must
-    # delete it before creating the new one rather than trying to patch it
-    # in place - otherwise the apply fails with "field is immutable".
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
   backoffLimit: 2
-  # The pod mounts postgres-server-tls, which only exists once cert-manager has
-  # issued it. Until then the kubelet retries the mount forever and no container
-  # runs, so without a deadline the hook would sit Running and syncPolicy.retry -
-  # which only fires on a sync that terminates as Failed - would never get a
-  # chance. 900s covers the operator bootstrapping all three instances.
   activeDeadlineSeconds: 900
   template:
     metadata:
@@ -135,10 +87,6 @@ spec:
     spec:
       serviceAccountName: postgres-smoke-test
       restartPolicy: Never
-      # Fetches the Vault root token into a shared emptyDir before the main
-      # container runs - kubectl isn't present in the hashicorp/vault image,
-      # and secretKeyRef can't reach across namespaces (the token Secret
-      # lives in vault, this Job runs in postgres).
       initContainers:
         - name: fetch-vault-token
           image: docker.io/alpine/k8s:1.34.9
@@ -148,9 +96,6 @@ spec:
             - |
               set -e
 
-              # Retry a command until it succeeds, bounded at ~5 min. Used by
-              # every smoke test in this repo so waiting behaves the same way
-              # everywhere.
               retry() {
                 n=0
                 until [ "$n" -ge 60 ]; do
@@ -163,13 +108,6 @@ spec:
                 return 1
               }
 
-              # A primary that's still being promoted refuses connections, so
-              # wait for it here rather than letting the main container's psql
-              # fail the whole test. Done in this container because the
-              # hashicorp/vault image has no kubectl. `kubectl wait` errors out
-              # immediately rather than waiting when nothing matches yet, so
-              # wait for existence first, then readiness. (`get -l` exits 0 on
-              # an empty list, hence the -n test.)
               primary_exists() {
                 [ -n "$(kubectl get pod -l cnpg.io/cluster=postgres,role=primary \
                   -n postgres -o name 2>/dev/null)" ]
@@ -179,21 +117,11 @@ spec:
                 -l cnpg.io/cluster=postgres,role=primary \
                 -n postgres --timeout=300s
 
-              # The operator creates this Secret during Vault's first-boot
-              # init, so it may not exist yet when this job starts.
               retry kubectl get secret vault-unseal-keys -n vault
               kubectl get secret vault-unseal-keys -n vault -o jsonpath='{.data.vault-root}' | base64 -d > /shared/vault-token
           volumeMounts:
             - name: shared
               mountPath: /shared
-        # Requests the dynamic lease. Split out from the psql check below
-        # because no single image has both the vault CLI and psql, and
-        # installing one at runtime is not an option on OpenShift: `apk add`
-        # writes to /lib/apk and /var/log, but restricted-v2 runs the container
-        # as an arbitrary non-root UID from the namespace's range, so it dies
-        # with "ERROR: Unable to open log: Permission denied" before the test
-        # even starts. Three init containers plus a main one, each on an image
-        # that already carries the tool it needs, avoids that entirely.
         - name: fetch-db-creds
           image: docker.io/hashicorp/vault:2.0.4
           env:
@@ -207,9 +135,6 @@ spec:
             - |
               set -e
 
-              # Retry a command until it succeeds, bounded at ~5 min. Used by
-              # every smoke test in this repo so waiting behaves the same way
-              # everywhere.
               retry() {
                 n=0
                 until [ "$n" -ge 60 ]; do
@@ -224,10 +149,6 @@ spec:
 
               export VAULT_TOKEN=$(cat /shared/vault-token)
 
-              # Vault may still be unsealing, electing a raft leader, or
-              # finishing its database-secrets-engine configuration - retried
-              # rather than assumed ready. Writes to the temp file only on
-              # success so a partial response can't be parsed below.
               echo "Requesting a live dynamic lease from database/creds/app-ro ..."
               get_lease() {
                 vault read -format=json database/creds/app-ro > /tmp/creds.json.tmp \
@@ -244,24 +165,14 @@ spec:
                 cat /tmp/creds.json
                 exit 1
               fi
-              # Vault's `username` field is just the resolved {{name}} macro, not
-              # the full role name - the actual role is created by hashicorp-vault's
-              # creation_statements as "vlt_app_ro_{{name}}", so that literal prefix
-              # has to be reapplied here to connect as the right role.
               echo "Got dynamic user: vlt_app_ro_$DB_USER (lease: $LEASE_ID)"
 
-              # Handed to the next containers on the shared emptyDir. Every
-              # container in the pod runs as the same SCC-assigned UID, so the
-              # files this one writes are readable by the ones that follow.
               printf '%s' "$LEASE_ID" > /shared/lease-id
               printf '%s' "vlt_app_ro_$DB_USER" > /shared/db-user
               printf '%s' "$DB_PASS" > /shared/db-pass
           volumeMounts:
             - name: shared
               mountPath: /shared
-        # The actual connectivity assertion, on the same image the CNPG Cluster
-        # itself runs (already present on the node, and multi-arch, so this
-        # works unchanged on an arm64 laptop and on amd64 cloud nodes).
         - name: psql-check
           image: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie
           command:
@@ -283,17 +194,9 @@ spec:
           volumeMounts:
             - name: shared
               mountPath: /shared
-            # postgres-server-tls (config/base/certificate.yaml, issued by
-            # demo-ca) carries the CA bundle needed to verify the Postgres
-            # server cert with sslmode=verify-full - vault-tls is a different
-            # cert in a different namespace and isn't relevant here.
             - name: postgres-ca
               mountPath: /postgres-ca
               readOnly: true
-      # Cleanup only. Because this is the main container it runs only after
-      # every init container succeeded, which is what "on failure the lease is
-      # left in place for debugging" means in practice: a failed psql-check
-      # never reaches this, so the lease survives for inspection.
       containers:
         - name: revoke-lease
           image: docker.io/hashicorp/vault:2.0.4

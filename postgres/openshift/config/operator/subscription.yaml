@@ -1,13 +1,3 @@
-# Package name matters here: "cloudnative-pg" is the upstream CNCF project
-# (CRDs under postgresql.cnpg.io, matching our Cluster manifests exactly).
-# "cloud-native-postgresql" is a different, EDB-owned certified package with
-# CRDs under postgresql.k8s.enterprisedb.io - incompatible with the Cluster CR
-# in ../../common/config/base/cluster.yaml. Don't swap them.
-#
-# This package supports AllNamespaces, so it relies on the "global-operators"
-# OperatorGroup OpenShift already creates in openshift-operators - no custom
-# OperatorGroup needed. No default CR is auto-created, but none is needed
-# beyond the Cluster CR already in ../../common/config/base/.
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
 metadata:

@@ -1,11 +1,2 @@
-## External Secrets Operator configuration
-# See manual/README.md for detailed explanation of CRD management.
-#
-# NOTE: The ClusterSecretStore / Vault wiring that used to live here (under a
-# `clusterSecretStore:` key) has moved to config/base/clustersecretstore.yaml.
-# It is no longer part of this chart's values - it is a plain Kustomize
-# manifest applied separately (manually, or via its own ArgoCD Application),
-# since it depends on HashiCorp Vault being configured first.
 external-secrets:
   installCRDs: true  # Disable CRD installation via Helm (recommended for production)
-  # By default, this uses the upstream chart's default behavior. See manual/README.md section "CRD Management" for best practices

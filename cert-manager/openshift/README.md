@@ -7,22 +7,17 @@ the shared `demo-ca` certificate authority — but installed via the Red Hat
 ## What's here
 
 ```text
-config/operator/    OperatorGroup + Subscription for cert-manager-operator  (wave 10)
-
-../common/config/   The demo-ca certificate authority                      (wave 20)
-../common/tests/    Prereq gate, then a smoke test that issues a throwaway cert
+config/operator/     OperatorGroup + Subscription            (wave 10)
+config/namespace/    The namespace, labelled for GitOps     (wave 10)
+../common/config/    The demo-ca certificate authority       (wave 20)
+../common/tests/     Prereq gate, then a smoke test that issues a throwaway cert
+../manual/           Install by hand instead
 ```
 
 ## Install
 
 Nothing to do — ArgoCD installs this first. See the
 [ArgoCD guide](../../argocd/README.md).
-
-The operator (`redhat-operators`, channel `stable-v1`) hardcodes its own
-namespace (`cert-manager-operator`) and the operand's namespace
-(`cert-manager`) — not configurable. It auto-creates a default `CertManager`
-CR named `cluster` if none exists, so nothing else needs to be authored to get
-the operand running.
 
 ## Verify
 
@@ -40,10 +35,19 @@ oc get clusterissuer
 Expect the CSV to be `Succeeded`, and `self-signed`/`demo-ca` clusterissuers
 both `READY=True`.
 
-## How the CA works
+## Notes
+
+### How the CA works
 
 Same three-resource chain as Kubernetes, in
 `../common/config/base/root-ca.yaml` — see
 [../kubernetes/README.md](../kubernetes/README.md#how-the-ca-works) for details.
 It's shared because the CA chain itself has no OpenShift-specific requirements;
 only how cert-manager gets installed differs.
+
+### The operator's namespaces aren't configurable
+
+The operator (`redhat-operators`, channel `stable-v1`) hardcodes both its own
+namespace (`cert-manager-operator`) and the operand's (`cert-manager`). It
+auto-creates a default `CertManager` CR named `cluster` if none exists, so
+nothing else needs authoring to get the operand running.

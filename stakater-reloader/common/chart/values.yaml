@@ -1,14 +1,3 @@
-# Default values for stakater-reloader wrapper chart.
-# This chart is a wrapper around the official stakater/reloader chart.
-#
-# Only settings truly shared by both platforms belong here - isOpenshift,
-# UID/securityContext and replica count all differ between them, so those
-# live in kubernetes/values.yaml and openshift/values.yaml instead, applied
-# as ArgoCD helm.valueFiles overlays.
-
 stakater-reloader:
   reloader:
-    # Also sets the subchart's containerSecurityContext.readOnlyRootFilesystem
-    # for us (see templates/deployment.yaml) - neither platform overrides
-    # this, so it's the one setting that actually belongs here.
     readOnlyRootFileSystem: true

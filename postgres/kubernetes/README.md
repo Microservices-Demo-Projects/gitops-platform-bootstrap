@@ -8,12 +8,11 @@ Run by [CloudNativePG](https://cloudnative-pg.io/) (CNPG), a CNCF operator.
 ## What's here
 
 ```text
-chart/       The CNPG operator (Helm chart)   (wave 30)
-values.yaml  Kubernetes-specific chart values
-
-../common/config/   The database cluster + its certificates   (wave 60)
-../common/tests/    Prereq gate, then a smoke test using a real Vault password
-../manual/          The older Bitnami-chart path - see ../manual/README.md
+chart/               The CNPG operator (Helm chart)             (wave 30)
+values.yaml          Kubernetes-specific chart values           (wave 30)
+../common/config/    The database cluster + its certificates    (wave 60)
+../common/tests/     Prereq gate, then a smoke test using a real Vault password
+../manual/           The older Bitnami-chart path
 ```
 
 Last wave, because it needs Vault (40) and External Secrets (50) working first.
@@ -50,51 +49,12 @@ the `ExternalSecret` example in the
 Every password Vault issues creates a **new PostgreSQL user**, deleted after an
 hour. Nothing to rotate, nothing to leak.
 
-## Roles
-
 | Role | Can do |
 | --- | --- |
 | `app_ro` | Read the `app` schema |
 | `app_rw` | Read and write the `app` schema |
 | `vault` | Create and drop the temporary users above. Logs in with a certificate, no password. |
 
-## Superuser access
-
-Off by default, on purpose. To turn it on temporarily:
-
-1. Set `enableSuperuserAccess: true` in `../common/config/base/cluster.yaml`
-2. Commit and push, let ArgoCD sync
-3. The password appears in the `postgres-superuser` Secret
-4. **Set it back to `false`** and sync again when you're done
-
-Every toggle is a git commit, so there's a record of when superuser access was open.
-
-Vault deliberately doesn't manage this password: to rotate a superuser's password
-Vault would itself need `SUPERUSER`, which is far too much access to grant for a
-credential this rarely used.
-
-## Why CNPG and not Bitnami
-
-The `manual/` path uses the Bitnami PostgreSQL chart and still works, but for GitOps
-CNPG is a better fit:
-
-- **Bitnami's images broke.** `docker.io/bitnami/postgresql:*` now 404s, and the
-  current chart defaults to an unpinned `:latest` — not something you can sync
-  repeatably.
-- **HA is built in.** The `Cluster` resource handles primary/replica topology,
-  failover and replication. No StatefulSet wiring by hand.
-- **cert-manager works natively.** Server, client and replication TLS all take
-  cert-manager secrets directly, reusing the shared `demo-ca`.
-- **Schema and roles are declarative** instead of a hand-run `psql` session.
-
-CNPG is Apache-2.0.
-
-## A bug worth knowing about
-
-The old Bitnami config tried to match Vault's dynamic users with the pg_hba rule
-`hostssl all vlt_+ ...`. `vlt_+` isn't valid pg_hba syntax, so it silently matched
-nothing — and since pg_hba is first-match-wins, every Vault user fell through to the
-catch-all rule instead.
-
-The CNPG config matches by role membership (`+app_ro`, `+app_rw`) instead, which
-matches any user that's a member of those roles — exactly what Vault creates.
+Superuser access is off by default and is a break-glass toggle — see
+[../README.md#notes](../README.md#notes), which also covers why Vault doesn't
+manage that password and how `pg_hba` matches the dynamic users.

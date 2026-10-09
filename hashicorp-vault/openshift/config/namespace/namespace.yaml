@@ -1,12 +1,4 @@
-# Registers this namespace with OpenShift GitOps so its application-controller
-# gets a namespace-scoped admin RoleBinding here (covers the ServiceAccount/
-# Service/Deployment the vault-operator chart creates, and the Vault CR
-# wave-040-vault.yaml applies) - but only once the namespace is also listed in
-# the ArgoCD CR's spec.namespaceManagement with allowManagedBy: true, which is
-# a one-time manual step - see
-# ../../../../argocd/openshift/0-prerequisite-argocd-setup/local-argocd-setup.md.
-# CreateNamespace=true on the Application would otherwise create this
-# namespace bare, without the label.
+# Labelled, not created by CreateNamespace=true. See ../../../../argocd/README.md#conventions-every-app-file-shares
 apiVersion: v1
 kind: Namespace
 metadata:

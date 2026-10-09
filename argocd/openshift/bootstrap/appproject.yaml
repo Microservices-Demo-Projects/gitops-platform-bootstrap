@@ -1,6 +1,3 @@
-# AppProject scoping every Application in argocd/openshift/apps/ to this repo
-# and an explicit set of namespaces/cluster resources - instead of leaving them
-# in ArgoCD's unrestricted `default` project.
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
@@ -30,7 +27,6 @@ spec:
     - server: https://kubernetes.default.svc
       namespace: stakater-reloader
 
-  # Cluster-scoped kinds every component's operator/CRD install needs.
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
@@ -50,8 +46,6 @@ spec:
       kind: APIService
     - group: external-secrets.io
       kind: ClusterSecretStore
-    # hashicorp-vault/openshift/config/scc - restricted-v2 plus the two
-    # capabilities the vault-operator hardcodes onto the Vault container.
     - group: security.openshift.io
       kind: SecurityContextConstraints
 

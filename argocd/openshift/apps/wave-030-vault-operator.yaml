@@ -1,15 +1,8 @@
-# The bank-vaults vault-operator controller only. The Vault CR it reconciles
-# is deployed separately by wave-040-vault.yaml, after this operator (and its
-# CRDs) exist. No OLM operator exists for Vault, so this is the same Helm
-# chart as Kubernetes, just with OpenShift-specific values.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: vault-operator
   namespace: openshift-gitops
-  # Cascades deletion to this Application's own resources, so removing the
-  # parent platform-root (which deletes this Application) also tears down what
-  # it deployed instead of orphaning it.
   finalizers:
     - resources-finalizer.argocd.argoproj.io
   annotations:
@@ -30,11 +23,6 @@ spec:
     - repoURL: https://github.com/Microservices-Demo-Projects/gitops-platform-bootstrap.git
       targetRevision: feature/argocd-gitops-bootstrap
       path: hashicorp-vault/openshift/config/namespace
-    # The custom SCC (restricted-v2 + IPC_LOCK/SETFCAP) and the RoleBinding
-    # granting it to the `vault` ServiceAccount. Here at wave 30 rather than
-    # with the Vault CR at wave 40 so it is already in place when the operator
-    # renders the StatefulSet - see that directory's scc.yaml for why the
-    # capabilities can't simply be removed instead.
     - repoURL: https://github.com/Microservices-Demo-Projects/gitops-platform-bootstrap.git
       targetRevision: feature/argocd-gitops-bootstrap
       path: hashicorp-vault/openshift/config/scc
@@ -48,9 +36,6 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-    # Transient bootstrap failures (a dependency's webhook or API not
-    # answering yet) are retried automatically instead of needing a manual
-    # re-sync: ~10s/20s/40s/80s/160s.
     retry:
       limit: 5
       backoff:

@@ -1,11 +1,6 @@
-# Wrapper chart values for the CloudNativePG operator.
-# This installs the cluster-wide CNPG controller only; the actual PostgreSQL
-# Cluster custom resource is declared separately under config/base/cluster.yaml.
 cloudnative-pg:
-  # Install the operator's CRDs by default for ease of use in this demo environment.
   crds:
     create: true
 
   config:
-    # Watch every namespace by default (demo environment).
     clusterWide: true

@@ -1,6 +1,4 @@
-# Vault server ServiceAccount, referenced by the Vault CR's spec.serviceAccount
-# below. Needs `system:auth-delegator` for Vault's `kubernetes` auth method to
-# call the TokenReview API when validating client ServiceAccount tokens.
+# system:auth-delegator lets Vault's kubernetes auth method call TokenReview.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -20,9 +18,8 @@ roleRef:
   name: system:auth-delegator
   apiGroup: rbac.authorization.k8s.io
 ---
-# The Vault pod itself (not the operator) reads/writes vault-unseal-keys via
-# the Kubernetes API for unsealConfig.kubernetes - the operator's own
-# ClusterRole doesn't cover this, so the pod's ServiceAccount needs it here.
+# The Vault pod (not the operator) reads/writes vault-unseal-keys itself, and the
+# operator's own ClusterRole doesn't cover that.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -47,56 +44,35 @@ roleRef:
   name: vault
   apiGroup: rbac.authorization.k8s.io
 ---
-# The Vault custom resource. The bank-vaults vault-operator (chart/, wave 30)
-# reconciles this into a StatefulSet, Services, TLS wiring, and fully
-# automated init + unseal (no manual `vault operator init`/`unseal`, unlike
-# manual/README.md). CRD reference: vault-operator:1.24.0's
-# vault.banzaicloud.com_vaults.yaml.
+# Reconciled by the bank-vaults vault-operator into a StatefulSet plus fully
+# automated init and unseal. See ../../../README.md#notes
 apiVersion: vault.banzaicloud.com/v1alpha1
 kind: Vault
 metadata:
   name: vault
   namespace: vault
 spec:
-  # 3-node Raft (integrated storage) quorum - real HA, unlike the manual
-  # path's single-node "standalone" + file storage.
   size: 3
 
-  # Fully-qualified, not the bare "hashicorp/vault" short name: RHEL nodes
-  # (and CRC) ship a short-name alias
-  # (/etc/containers/registries.conf.d/001-rhel-shortnames.conf) redirecting
-  # it to registry.connect.redhat.com/hashicorp/vault, whose catalog doesn't
-  # carry the 2.0.4 tag - ImagePullBackOff: "name unknown: Image not found".
+  # Fully qualified on purpose: a bare "hashicorp/vault" resolves to a Red Hat
+  # short-name alias on RHEL/CRC nodes that has no 2.0.4 tag.
   image: docker.io/hashicorp/vault:2.0.4
-  # Sidecar image the operator injects to drive init/unseal/config. Falls
-  # back to the operator chart's bankVaults.image if left unset; pinned here
-  # for reproducibility.
   bankVaultsImage: ghcr.io/bank-vaults/bank-vaults:v1.33.1
 
   serviceAccount: vault
   serviceType: ClusterIP
 
-  # Bring our own cert-manager-issued certificate (config/base/certificate.yaml)
-  # instead of letting the operator mint a self-signed one.
   existingTlsSecretName: vault-tls
 
-  # Distribute the CA bundle backing vault-tls to other namespaces that need
-  # to validate Vault's server certificate (e.g. external-secrets' mTLS
-  # client).
+  # Namespaces that need the CA bundle to validate Vault's server certificate.
   caNamespaces:
     - external-secrets
 
-  # This is what makes init + unseal fully automatic: on first boot the
-  # operator generates the root token + unseal key shares and stores them in
-  # this Kubernetes Secret, then automatically re-unseals every Vault pod
-  # (including after restarts) using the same Secret. Nobody ever runs
-  # `vault operator init` / `vault operator unseal` by hand on this path.
   unsealConfig:
     kubernetes:
       secretNamespace: vault
       secretName: vault-unseal-keys
 
-  # Raft (integrated storage) needs its own per-pod volume.
   volumeClaimTemplates:
     - metadata:
         name: vault-raft
@@ -111,8 +87,6 @@ spec:
     - name: vault-raft
       mountPath: /vault/file
 
-  # A YAML representation of the final vault.hcl server config.
-  # See https://developer.hashicorp.com/vault/docs/configuration for details.
   config:
     disable_mlock: true
     storage:
@@ -128,12 +102,7 @@ spec:
     cluster_addr: "https://${.Env.POD_NAME}:8201"
     ui: true
 
-  # Declarative Vault configuration, applied by the operator's bank-vaults
-  # sidecar once unsealed: policies, the `kubernetes` auth method + roles, and
-  # the secrets engines the platform depends on (kv-v2 for generic secrets,
-  # database for postgres's rotating/static creds). Free-form field (CRD only
-  # declares x-kubernetes-preserve-unknown-fields); shape matches bank-vaults'
-  # own vault-config.yml / deploy/examples/cr-raft.yaml.
+  # Applied by the bank-vaults sidecar once Vault is unsealed.
   externalConfig:
     policies:
       - name: external-secrets-readonly-policy
@@ -147,15 +116,7 @@ spec:
 
     auth:
       - type: kubernetes
-        # bank-vaults auto-fills config.kubernetes_host from
-        # $KUBERNETES_SERVICE_HOST when no `config:` block is given, which is
-        # correct for an in-cluster API server, so no config block is needed
-        # here.
         roles:
-          # Bound to external-secrets' own ServiceAccount (external-secrets/
-          # external-secrets), matching the `role: external-secrets` /
-          # `serviceAccountRef` used by external-secrets'
-          # config/base/clustersecretstore/clustersecretstore.yaml.
           - name: external-secrets
             bound_service_account_names: ["external-secrets"]
             bound_service_account_namespaces: ["external-secrets"]
@@ -177,19 +138,10 @@ spec:
             - name: pocdb
               plugin_name: postgresql-database-plugin
               allowed_roles: ["app-ro", "app-rw", "app-setup"]
-              # postgres/config/base/cluster.yaml's pg_hba requires mTLS-only
-              # auth for `vault` (no password fallback), so this connects
-              # with the same cert-manager client cert the operator mounts
-              # for the server listener (CN "vault", trusted via the shared
-              # demo-ca bundle) - no username/password needed.
+              # mTLS only, no password: postgres's pg_hba requires it of `vault`.
               connection_url: "postgresql://postgres-rw.postgres.svc.cluster.local:5432/pocdb?sslmode=verify-full&sslrootcert=/vault/tls/ca.crt&sslcert=/vault/tls/server.crt&sslkey=/vault/tls/server.key"
-              # MUST be false: postgres doesn't exist yet when this first
-              # syncs at wave 40. The postgres component's own smoke test
-              # exercises this connection once it does.
+              # Must stay false - postgres doesn't exist yet at wave 40.
               verify_connection: false
-          # Dynamic roles are self-rotating by design: every credential
-          # request mints a brand-new random user, auto-revoked at
-          # default_ttl and hard-capped at max_ttl. No separate job needed.
           roles:
             - name: app-ro
               db_name: pocdb
@@ -218,12 +170,3 @@ spec:
                 GRANT ALL PRIVILEGES ON DATABASE pocdb TO "vlt_setup_{{name}}";
               default_ttl: "1h"
               max_ttl: "24h"
-          # The postgres superuser itself is deliberately NOT managed here.
-          # PostgreSQL only lets a role with the actual SUPERUSER attribute
-          # alter another superuser's password - membership grants aren't
-          # enough - so giving Vault that access would mean granting `vault`
-          # SUPERUSER, which is a bigger blast radius than a password
-          # rotation job warrants. Superuser access is handled instead as a
-          # manual, audited break-glass toggle (see cluster.yaml's
-          # enableSuperuserAccess); Vault's job stays scoped to the
-          # non-superuser app roles above.

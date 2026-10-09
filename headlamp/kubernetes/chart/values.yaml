@@ -1,14 +1,8 @@
-## Default values for headlamp wrapper chart.
-# This chart is a wrapper around the official kubernetes-sigs/headlamp chart.
-
 headlamp:
-  # Configure Headlamp to serve HTTPS directly
   config:
     tlsCertPath: "/headlamp-cert/tls.crt"
     tlsKeyPath: "/headlamp-cert/tls.key"
 
-  # Mount the certificate secret
-  # Key names must match upstream chart: 'volumes' and 'volumeMounts'
   volumes:
     - name: headlamp-cert
       secret:
@@ -19,14 +13,10 @@ headlamp:
       mountPath: "/headlamp-cert"
       readOnly: true
 
-  # Ensure the service maps correct ports
   service:
     type: ClusterIP
     port: 443
     targetPort: 4466
 
-  # The upstream chart hardcoded the probe scheme to HTTP prior to 0.44.0,
-  # which required a manual kubectl patch since Headlamp serves HTTPS.
-  # Setting this declaratively removes the need for that patch.
   probes:
     scheme: HTTPS

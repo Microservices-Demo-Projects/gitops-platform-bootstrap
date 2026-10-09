@@ -1,11 +1,2 @@
-# The PreSync gate on its own, so both platforms can pull it in as a shared
-# directory. It lives here rather than beside the smoke test in ../base because
-# kustomize refuses to reference an individual *file* outside an overlay's own
-# directory ("file is not in or below") - only a directory with its own
-# kustomization.yaml can be shared across overlays. ../base and
-# ../../../openshift/tests both reference this.
-#
-# The gate itself is genuinely identical on both platforms apart from two env
-# values (where the CNPG operator landed), which the OpenShift overlay patches.
 resources:
   - presync-gate-job.yaml

@@ -8,13 +8,12 @@ client, no token, no Vault-specific code. External Secrets does the talking.
 ## What's here
 
 ```text
-values.yaml  Kubernetes-specific chart values
-
-../common/chart/                        The ESO controller (Helm chart)  (wave 30)
-../common/config/certificate/           ESO's mTLS certificate           (wave 30)
+values.yaml          Kubernetes-specific chart values          (wave 30)
+../common/chart/     The ESO controller (Helm chart)           (wave 30)
+../common/config/certificate/           ESO's mTLS certificate                      (wave 30)
 ../common/config/clustersecretstore/    The ClusterSecretStore - the link to Vault  (wave 50)
-../common/tests/                        Prereq gate, then a smoke test that pulls a real secret from Vault
-../manual/                              Install by hand instead - see ../manual/README.md
+../common/tests/     Prereq gate, then a smoke test that pulls a real secret from Vault
+../manual/           Install by hand instead
 ```
 
 Two waves because the link to Vault can't be tested until Vault is configured
@@ -63,7 +62,9 @@ A Secret named `my-db-credentials` appears in your namespace. Mount it like any
 other. Pair it with [Reloader](../../stakater-reloader/README.md) and your pods restart
 automatically when the value rotates.
 
-## How it authenticates to Vault
+## Notes
+
+### How it authenticates to Vault
 
 Two things at once, no passwords involved:
 
@@ -73,7 +74,7 @@ Two things at once, no passwords involved:
 
 Vault grants it read-only access to `kv/*` and `database/creds/*`, nothing more.
 
-## Difference from the manual path
+### Difference from the manual path
 
 The manual install needs two passes: install ESO, configure Vault, then re-run
 `helm upgrade --set clusterSecretStore.required=true`. Here the `ClusterSecretStore`

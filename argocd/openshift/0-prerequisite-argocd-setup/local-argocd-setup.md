@@ -1,7 +1,7 @@
 # Local ArgoCD Setup (OpenShift)
 
-Quick-test GitOps installation for a local OpenShift cluster (CRC). For AWS EKS /
-Kubernetes, see the `kubernetes/` setup docs.
+Quick-test GitOps installation for a local OpenShift cluster (CRC). For AWS EKS or
+plain Kubernetes, see the `kubernetes/` setup docs.
 
 Reference: https://docs.redhat.com/en/documentation/red_hat_openshift_gitops
 
@@ -12,9 +12,8 @@ Set the `oc` context first:
 oc login -u kubeadmin https://api.crc.testing:6443
 ```
 
-Install the **Red Hat OpenShift GitOps Operator** via OLM instead of the raw
-`install.yaml` used on Kubernetes — this is the supported, secure way to run
-ArgoCD on OpenShift (it wires up SCCs and RBAC for you):
+Install the **Red Hat OpenShift GitOps Operator** via OLM rather than the raw
+`install.yaml` used on Kubernetes — it wires up the SCCs and RBAC for you:
 ```bash
 oc apply -f - <<'EOF'
 apiVersion: operators.coreos.com/v1alpha1
@@ -29,18 +28,16 @@ spec:
   sourceNamespace: openshift-marketplace
 EOF
 
-# Wait for the operator's ClusterServiceVersion to succeed
 oc get csv -n openshift-operators -w
 ```
 
-Installing the operator **automatically creates** the `openshift-gitops`
-namespace, a default `openshift-gitops` ArgoCD instance in it, and a Route for the
-UI — there's no ArgoCD CR to author by hand.
+The operator creates the `openshift-gitops` namespace, a default `openshift-gitops`
+ArgoCD instance in it, and a Route for the UI — there's no ArgoCD CR to author.
 
 Verify:
 ```bash
-oc get all -n openshift-gitops
 oc wait pod --all --for=condition=Ready --namespace=openshift-gitops --timeout=180s
+oc get all -n openshift-gitops
 ```
 
 ## Access UI
@@ -75,9 +72,8 @@ pkill -f "oc port-forward"
 # Install CLI (macOS)
 brew install argocd
 
-# Port-forward straight to the service, bypassing the OpenShift router -
-# logging in through the Route hits `gRPC connection not ready` even with
-# --grpc-web, so this is the reliable path for the CLI.
+# Port-forward past the router: logging in through the Route hits
+# `gRPC connection not ready` even with --grpc-web.
 nohup oc port-forward svc/openshift-gitops-server -n openshift-gitops 8080:443 &
 
 # Get password and login
@@ -90,23 +86,85 @@ argocd repo list
 argocd app list
 ```
 
+## Configure Git Access
+
+**HTTPS (Personal Access Token):**
+```bash
+oc create secret generic github-credentials \
+  --from-literal=type=git \
+  --from-literal=url=https://github.com \
+  --from-literal=username=<USERNAME> \
+  --from-literal=password=<PERSONAL_ACCESS_TOKEN> \
+  -n openshift-gitops
+
+oc label secret github-credentials argocd.argoproj.io/secret-type=repository -n openshift-gitops
+```
+
+**SSH — `secret-type=repository` (one secret per exact repo):**
+
+`url` must be the exact clone URL of this repo — ArgoCD matches a
+`secret-type=repository` secret against the `repoURL` in each
+`Application`/`AppProject`, and a bare host matches nothing.
+
+```bash
+# Generate key (if needed), or point --from-file at an existing private key
+ssh-keygen -t ed25519 -f argocd-key -N ""
+
+oc create secret generic github-ssh \
+  --from-literal=type=git \
+  --from-literal=name=github-ssh \
+  --from-literal=project=default \
+  --from-literal=url=git@github.com:<ORG>/<REPO>.git \
+  --from-literal=username=<USERNAME> \
+  --from-file=sshPrivateKey=<path-to-private-key> \
+  -n openshift-gitops
+
+oc label secret github-ssh argocd.argoproj.io/secret-type=repository -n openshift-gitops
+```
+
+Add the public key (`argocd-key.pub`) to your GitHub SSH keys.
+
+**SSH — `secret-type=repo-creds` (credential template for every repo under a prefix):**
+
+Here `url` *is* a bare host or prefix: ArgoCD applies these credentials to any
+repo whose `repoURL` starts with it, so one secret covers a whole GitHub org.
+
+```bash
+oc create secret generic github-ssh-creds \
+  --from-literal=type=git \
+  --from-literal=url=git@github.com:<ORG>/ \
+  --from-literal=username=<USERNAME> \
+  --from-file=sshPrivateKey=<path-to-private-key> \
+  -n openshift-gitops
+
+oc label secret github-ssh-creds argocd.argoproj.io/secret-type=repo-creds -n openshift-gitops
+```
+
+**Repository-specific credentials (HTTPS, `secret-type=repository`):**
+
+Same exact-URL matching as the SSH `secret-type=repository` case, over HTTPS with
+a username and PAT instead of a key.
+
+```bash
+oc create secret generic repo-specific \
+  --from-literal=type=git \
+  --from-literal=url=https://github.com/<USERNAME>/<REPO>.git \
+  --from-literal=username=<USERNAME> \
+  --from-literal=password=<PERSONAL_ACCESS_TOKEN> \
+  -n openshift-gitops
+
+oc label secret repo-specific argocd.argoproj.io/secret-type=repository -n openshift-gitops
+```
 
 ## Grant the App Controller Access to the Platform's Namespaces
 
-OpenShift GitOps' default `argocd-application-controller` ClusterRole is
-intentionally narrow: full write access to a short allowlist of apiGroups
-(`operators.coreos.com`, `rbac.authorization.k8s.io`, `storage.k8s.io`, a few
-`*.openshift.io` groups) plus `namespaces`/`configmaps`/PV(C)s - everything
-else cluster-scoped is read-only. Every namespace this platform deploys
-into (`cert-manager`, `external-secrets`, `vault`, `postgres`,
-`stakater-reloader`) needs to be explicitly registered before the controller
-can write ordinary namespaced resources (Deployments, Services, Certificates,
-the Vault/Cluster/OperatorConfig CRs) into it. Each component's
-`openshift/config/namespace/` already labels its namespace
-`argocd.argoproj.io/managed-by: openshift-gitops` via GitOps - what's missing
-is telling the ArgoCD instance itself that it's allowed to act on that label,
-which only a cluster-admin can do (patching the operand's own CR isn't
-something the GitOps-managed content can safely do for itself):
+OpenShift-only, and a cluster-admin has to do it once. The default
+`argocd-application-controller` ClusterRole can write only a short allowlist of
+apiGroups, so each namespace this platform deploys into must be registered before
+the controller may create ordinary namespaced resources in it. Each component's
+`openshift/config/namespace/` already applies the
+`argocd.argoproj.io/managed-by: openshift-gitops` label via GitOps; this patch is
+what tells the ArgoCD instance it may act on that label.
 
 ```bash
 oc patch argocd openshift-gitops -n openshift-gitops --type merge -p '
@@ -125,123 +183,13 @@ spec:
 '
 ```
 
-This grants a namespace-scoped `admin` RoleBinding in each, which does **not**
-cover cluster-scoped resources (CRDs, `ClusterIssuer`, `ClusterSecretStore`) -
-those are handled separately by
-`argocd/openshift/apps/wave-005-argocd-extra-rbac.yaml`, a GitOps-managed
-ClusterRole/ClusterRoleBinding (safe to self-apply since
-`rbac.authorization.k8s.io` is already fully permitted).
-
-## Configure Git Access
-
-**HTTPS (Personal Access Token):**
-```bash
-oc create secret generic github-credentials \
-  --from-literal=type=git \
-  --from-literal=url=https://github.com \
-  --from-literal=username=<USERNAME> \
-  --from-literal=password=<PERSONAL_ACCESS_TOKEN> \
-  -n openshift-gitops
-
-oc label secret github-credentials argocd.argoproj.io/secret-type=repository -n openshift-gitops
-```
-
-**SSH — `secret-type=repository` (one secret per exact repo):**
-
-`url` must be the **exact clone URL of this repo**, not just `git@github.com` — a
-`argocd.argoproj.io/secret-type=repository` secret is matched by ArgoCD against
-the `repoURL` used in each `Application`/`AppProject` (e.g.
-`spec.source.repoURL` in `root-app.yaml`), and a bare host doesn't match anything.
-
-```bash
-# Generate key (if needed)
-ssh-keygen -t ed25519 -f argocd-key -N ""
-# Or provide the path of an existing private key file.
-
-# Create secret
-oc create secret generic github-ssh \
-  --from-literal=type=git \
-  --from-literal=name=github-ssh \
-  --from-literal=project=default \
-  --from-literal=url=git@github.com:<ORG>/<REPO>.git \
-  --from-literal=username=<USERNAME> \
-  --from-file=sshPrivateKey=<path-to-private-key> \
-  -n openshift-gitops
-
-oc label secret github-ssh argocd.argoproj.io/secret-type=repository -n openshift-gitops
-```
-
-For example, for this repo:
-```bash
-oc create secret generic github-ssh \
-  --from-literal=type=git \
-  --from-literal=name=github-ssh \
-  --from-literal=project=default \
-  --from-literal=url=git@github.com:Microservices-Demo-Projects/gitops-platform-bootstrap.git \
-  --from-literal=username=sriram-ponangi \
-  --from-file=sshPrivateKey=/Users/sriram/.ssh/sriram_github_id_ed25519 \
-  -n openshift-gitops
-
-oc label secret github-ssh argocd.argoproj.io/secret-type=repository -n openshift-gitops
-```
-
-Add public key (`argocd-key.pub`) to GitHub SSH keys.
-
-**SSH — `secret-type=repo-creds` (credential template for every repo under a prefix):**
-
-Unlike `secret-type=repository`, `url` here *is* a bare host/prefix, not an exact
-clone URL — ArgoCD applies these credentials to any repo whose `repoURL` starts
-with this prefix, so one secret covers every repo under that GitHub org/user
-without adding a new secret per repo.
-
-```bash
-oc create secret generic github-ssh-creds \
-  --from-literal=type=git \
-  --from-literal=url=git@github.com:<ORG>/ \
-  --from-literal=username=<USERNAME> \
-  --from-file=sshPrivateKey=<path-to-private-key> \
-  -n openshift-gitops
-
-oc label secret github-ssh-creds argocd.argoproj.io/secret-type=repo-creds -n openshift-gitops
-```
-
-For example, to cover every repo under this org:
-```bash
-oc create secret generic github-ssh-creds \
-  --from-literal=type=git \
-  --from-literal=url=git@github.com:Microservices-Demo-Projects/ \
-  --from-literal=username=sriram-ponangi \
-  --from-file=sshPrivateKey=/Users/sriram/.ssh/sriram_github_id_ed25519 \
-  -n openshift-gitops
-
-# OR env just --from-literal=url=git@github.com like: 
-oc create secret generic github-ssh-creds \
-  --from-literal=type=git \
-  --from-literal=url=git@github.com \
-  --from-literal=username=sriram-ponangi \
-  --from-file=sshPrivateKey=/Users/sriram/.ssh/sriram_github_id_ed25519 \
-  -n openshift-gitops
-
-oc label secret github-ssh-creds argocd.argoproj.io/secret-type=repo-creds -n openshift-gitops
-```
-
-**Repository-specific credentials (HTTPS, `secret-type=repository`):**
-
-Same exact-URL matching as the SSH `secret-type=repository` case above, but over
-HTTPS with a username/PAT instead of an SSH key.
-
-```bash
-oc create secret generic repo-specific \
-  --from-literal=type=git \
-  --from-literal=url=https://github.com/<USERNAME>/<REPO>.git \
-  --from-literal=username=<USERNAME> \
-  --from-literal=password=<PERSONAL_ACCESS_TOKEN> \
-  -n openshift-gitops
-
-oc label secret repo-specific argocd.argoproj.io/secret-type=repository -n openshift-gitops
-```
+That grants a namespace-scoped `admin` RoleBinding in each. Cluster-scoped
+resources (CRDs, `ClusterIssuer`, `ClusterSecretStore`) are handled separately by
+[../apps/wave-005-argocd-extra-rbac.yaml](../apps/wave-005-argocd-extra-rbac.yaml),
+which is safe to self-apply because `rbac.authorization.k8s.io` is already
+permitted.
 
 ## Next Steps
 
 - [OpenShift GitOps Docs](https://docs.redhat.com/en/documentation/red_hat_openshift_gitops)
-- [Follow the Installation Guide of POC Projects](https://github.com/Microservices-Demo-Projects/gitops-platform-bootstrap)
+- Bootstrap the platform → [../../README.md](../../README.md)

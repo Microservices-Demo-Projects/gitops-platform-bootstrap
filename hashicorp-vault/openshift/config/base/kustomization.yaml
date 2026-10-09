@@ -1,25 +1,10 @@
-# Same Vault CR and RBAC as Kubernetes (see ../../../common/config/base), with
-# two OpenShift-only patches. Both exist for the same underlying reason: on
-# OpenShift the Vault pod's UID is assigned dynamically by the restricted-v2
-# SCC rather than baked into the image, and two things break when they assume
-# otherwise. The Kubernetes copy in common/ is deliberately left untouched.
+# The shared Vault CR and RBAC, plus two patches for OpenShift's dynamically
+# assigned UID. common/ is deliberately left untouched.
 resources:
   - ../../../common/config/base
 
 patches:
-  # 1. platformManagedSecurityContext - without it the vault-operator sets an
-  #    explicit fsGroup (and runAsUser) on both the Vault pod and the
-  #    vault-configurer pod, which restricted-v2 rejects outright (fsGroup: 1000
-  #    is not in the namespace's allocated range) - confirmed via:
-  #      pods "vault-configurer-..." is forbidden: unable to validate against any
-  #      security context constraint: [... restricted-v2: .spec.securityContext.fsGroup:
-  #      Invalid value: []int64{1000}: 1000 is not an allowed group ...]
-  #    Setting this field (CRD: vault.spec.platformManagedSecurityContext, see
-  #    banzaicloud/vault-operator's VaultSpec doc comment) tells the operator to
-  #    leave the security context unset on both pods so OpenShift's SCC can
-  #    assign one dynamically instead - the same shape as stakater-reloader's
-  #    isOpenshift flag, just for this operator's own CRD instead of a Helm
-  #    chart's values.
+  # Lets the SCC assign the security context. See ../../README.md#the-pods-uid-and-fsgroup
   - target:
       kind: Vault
       name: vault
@@ -28,30 +13,7 @@ patches:
         path: /spec/platformManagedSecurityContext
         value: true
 
-  # 2. user=vault in the database secrets engine's connection_url.
-  #
-  #    The shared URL carries the client cert/key but no username, which is fine
-  #    on Kubernetes: the vault image runs as uid 100, that uid has an
-  #    /etc/passwd entry named "vault", and libpq's fallback (the OS user of the
-  #    connecting process) therefore happens to produce exactly the right name.
-  #
-  #    On OpenShift there is no such entry. restricted-v2 assigns an arbitrary
-  #    UID from the namespace range and nothing maps it to a name, so libpq falls
-  #    back to the bare number and asks Postgres to authenticate a role that does
-  #    not exist. The client cert is valid and its CN *is* vault, but the cert is
-  #    checked against the requested username, so CNPG rejects it:
-  #
-  #      FATAL: certificate authentication failed for user "1000790000" (SQLSTATE 28000)
-  #
-  #    (See postgres/common/config/base/cluster.yaml - the pg_hba catch-all rule
-  #    is `hostssl all all 0.0.0.0/0 cert clientcert=verify-full`, which is what
-  #    the numeric username lands on.)
-  #
-  #    Stating the username explicitly removes the guess. It is behaviour-
-  #    identical on Kubernetes - it just spells out the name libpq was already
-  #    deriving there - so this could equally live in common/; it is here because
-  #    only the OpenShift path actually needs it and the Kubernetes manifests are
-  #    a known-working copy.
+  # libpq can't infer the username here. See ../../README.md#the-database-connection-needs-an-explicit-username
   - target:
       kind: Vault
       name: vault
