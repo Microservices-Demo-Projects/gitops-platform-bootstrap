@@ -1,7 +1,12 @@
-# Local ArgoCD Setup (OpenShift)
+# ArgoCD Setup (OpenShift)
 
-Quick-test GitOps installation for a local OpenShift cluster (CRC). For AWS EKS or
-plain Kubernetes, see the `kubernetes/` setup docs.
+GitOps installation for an OpenShift cluster. Written against a local CRC cluster,
+but the same steps work unchanged on any dev/test-sized OpenShift cluster — nothing
+here is CRC-specific. For plain Kubernetes, see the [kubernetes/](../../kubernetes/0-prerequisite-argocd-setup/argocd-setup.md) setup docs.
+
+This is not a production install guide. The operator ships a single-instance
+`ArgoCD` CR by default; for production sizing and HA, follow the guidance in the
+official docs linked below instead of this doc.
 
 Reference: https://docs.redhat.com/en/documentation/red_hat_openshift_gitops
 

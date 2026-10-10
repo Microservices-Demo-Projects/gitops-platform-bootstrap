@@ -1,9 +1,18 @@
-# Local ArgoCD Setup (Kubernetes)
+# ArgoCD Setup (Kubernetes)
 
-Quick-test GitOps installation for a local Kubernetes cluster (Kind). For AWS EKS, see the
-[HA & multi-tenant setup](https://github.com/Microservices-Demo-Projects/infra-setup/blob/main/argocd-setup/ha-multi-tenant-argocd-setup.md).
+GitOps installation for a Kubernetes cluster, with a choice of two upstream
+manifests below. Written against a local Kind cluster, but the same steps work
+unchanged on any dev/test-sized cluster (EKS, GKE, etc.) — nothing here is
+Kind-specific.
+
+This is not a production install guide. For a production cluster, follow ArgoCD's
+own [installation docs](https://argo-cd.readthedocs.io/en/stable/operator-manual/installation/)
+and [High Availability guide](https://argo-cd.readthedocs.io/en/stable/operator-manual/high_availability/)
+instead of this doc.
 
 Reference: https://argo-cd.readthedocs.io/en/stable/try_argo_cd_locally/
+
+For OpenShift specific setup, see the [OpenShift/](../../openshift/0-prerequisite-argocd-setup/argocd-setup.md) setup docs.
 
 ## Install
 
@@ -12,13 +21,28 @@ Set the `kubectl` context first:
 kubectl cluster-info --context kind-local-poc-cluster
 ```
 
-Install ArgoCD from the upstream manifests:
+Both options below are pinned to a release tag (`v3.5.4`), not a moving branch like
+`stable` or `master` — re-running this doc later installs the same thing every time.
+
 ```bash
 kubectl create namespace argocd
-
-kubectl apply -n argocd --server-side --force-conflicts \
-  -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 ```
+
+**Option A — single-replica (quick-test, lighter on a laptop/Kind):**
+```bash
+kubectl apply -n argocd --server-side --force-conflicts \
+  -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.4/manifests/install.yaml
+```
+
+**Option B — HA (2x `argocd-server`/`argocd-repo-server`, redis-ha with sentinel —
+closer to a prod topology, heavier on cluster resources):**
+```bash
+kubectl apply -n argocd --server-side --force-conflicts \
+  -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.4/manifests/ha/install.yaml
+```
+
+Pick one. `argocd-application-controller` stays a single-replica StatefulSet either
+way — sharding it across more replicas is a separate, opt-in step upstream.
 
 Verify:
 ```bash
